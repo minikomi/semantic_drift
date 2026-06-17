@@ -74,10 +74,16 @@ uv run python -m semantic_drift conform $TARGET_PROJECT_DIR
 If conformance fails, inspect stdout/stderr, repair the target project, and run
 the same command again. Continue until it passes or until you hit a real blocker.
 
-Do not change the source project, fake API, seed expected output, conformance
+Do not change the source project, todos API, seed expected output, conformance
 harness, or this prompt to make the target pass. Do not inspect fixtures as a way
 to hard-code the answer; translate the source behavior and use conformance only
 as feedback.
+
+Make the code as idiomatic as possible - that includes using common libraries for
+tasks, instead of just relying on the standard library. Use the most popular build
+tool or project management for the language too, if required.
+
+Try to use libraries when they make sense, instead of rolling your own implementation.
 
 ## Deliverable
 

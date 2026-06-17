@@ -238,6 +238,75 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Semantic Drift generated dependency/build directories
+node_modules/
+vendor/
+target/
+dist/
+build/
+.venv/
+
+# TypeScript / JavaScript
+.npm/
+.pnpm-store/
+.yarn/
+*.tsbuildinfo
+coverage/
+
+# Ruby
+.bundle/
+vendor/bundle/
+*.gem
+.ruby-version
+
+# PHP / Composer
+composer.phar
+.phpunit.cache/
+.phpunit.result.cache
+
+# Java / Maven / Gradle
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+.gradle/
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+# Haskell / Cabal / Stack
+dist-newstyle/
+.stack-work/
+cabal.project.local
+cabal.project.local~
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+
+# Common Lisp
+*.fasl
+*.fas
+*.lib
+*.x86f
+*.lx64fsl
+*.dx64fsl
+*.abcl
+
+# Zig
+.zig-cache/
+zig-cache/
+zig-out/
+*.zig-cache/
+
+# Rust
+**/target/
+
+# Go
+bin/
+*.prof
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

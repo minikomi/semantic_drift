@@ -74,7 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--sandbox",
         default="workspace-write",
         choices=["read-only", "workspace-write", "danger-full-access"],
-        help="Codex sandbox mode, defaults to workspace-write",
+        help="Codex sandbox mode used only with --use-sandbox",
+    )
+    rewrite_parser.add_argument(
+        "--use-sandbox",
+        action="store_true",
+        help=(
+            "run child Codex inside a sandbox; by default rewrite bypasses "
+            "sandboxing so conformance can use localhost and normal caches"
+        ),
     )
 
     return parser
@@ -142,11 +150,13 @@ def rewrite(args: argparse.Namespace) -> int:
         "exec",
         "--cd",
         str(repo_root),
-        "--sandbox",
-        args.sandbox,
         "--skip-git-repo-check",
         "-",
     ]
+    if args.use_sandbox:
+        command[2:2] = ["--sandbox", args.sandbox]
+    else:
+        command[2:2] = ["--dangerously-bypass-approvals-and-sandbox"]
     if args.model is not None:
         command[2:2] = ["--model", args.model]
 

@@ -78,4 +78,44 @@ uv run python -m semantic_drift rewrite \
   --target-dir runs/latest/02-typescript
 ```
 
+For this local experiment, rewrite runs child Codex with sandbox bypass by
+default so it can run the conformance server, connect to localhost, and use
+normal tool caches:
+
+```sh
+uv run python -m semantic_drift rewrite \
+  --source-language Go \
+  --target-language TypeScript \
+  --source-dir runs/latest/01-go \
+  --target-dir runs/latest/02-typescript
+```
+
 The child Codex process receives only the rendered prompt as its task prompt.
+
+## Full Chain
+
+Run the configured chain:
+
+```text
+Go -> TypeScript -> Python -> Ruby -> Bash -> Java -> Haskell -> Common Lisp -> Zig -> Rust -> Go
+```
+
+```sh
+scripts/run_chain.sh
+```
+
+The script stops on the first rewrite or conformance failure. It writes steps to:
+
+```text
+runs/latest/01-go
+runs/latest/02-typescript
+runs/latest/03-python
+runs/latest/04-ruby
+runs/latest/05-bash
+runs/latest/06-java
+runs/latest/07-haskell
+runs/latest/08-common-lisp
+runs/latest/09-zig
+runs/latest/10-rust
+runs/latest/11-go
+```
