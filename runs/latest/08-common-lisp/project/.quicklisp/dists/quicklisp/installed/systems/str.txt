@@ -1,1 +1,0 @@
-dists/quicklisp/software/cl-str-20260101-git/str.asd

@@ -1,1 +1,0 @@
-dists/quicklisp/software/cl-change-case-20250622-git/cl-change-case.asd
