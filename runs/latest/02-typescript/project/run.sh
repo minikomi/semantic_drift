@@ -8,7 +8,7 @@ fi
 
 cd "$(dirname "$0")"
 if [ ! -d node_modules ]; then
-  npm install --silent
+  npm ci --silent
 fi
-
-exec npm run --silent start -- "$1"
+npm run build --silent
+exec npm run start --silent -- "$1"

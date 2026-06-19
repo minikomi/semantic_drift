@@ -8,7 +8,7 @@ languages=(
   "TypeScript"
   "Python"
   "Ruby"
-  "PHP"
+  "C++"
   "Java"
   "Haskell"
   "Common Lisp"
@@ -22,7 +22,7 @@ steps=(
   "02-typescript"
   "03-python"
   "04-ruby"
-  "05-php"
+  "05-cpp"
   "06-java"
   "07-haskell"
   "08-common-lisp"
@@ -42,6 +42,11 @@ for ((i = 0; i < ${#steps[@]} - 1; i++)); do
 
   printf '\n==> %s -> %s (%s -> %s)\n' \
     "$source_language" "$target_language" "$source_step" "$target_step"
+
+  if [[ -f "${target_project}/run.sh" ]]; then
+    printf '    skipping: %s already exists\n' "$target_project"
+    continue
+  fi
 
   uv run python -m semantic_drift rewrite \
     --source-language "$source_language" \

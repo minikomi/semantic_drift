@@ -23,6 +23,9 @@ specification in this prompt.
 The conformance command is the oracle for whether the translated project
 preserves the observable behavior.
 
+Do not hard-code fixture data, expected output, timestamps, API responses, or
+other harness constants into the program logic or `run.sh`.
+
 ## Required Target Shape
 
 Create or replace only the target project directory:
@@ -48,8 +51,11 @@ run.sh
 ./run.sh http://127.0.0.1:8899/todos
 ```
 
-It should change to its own directory before building/running so it works when
+It must change to its own directory before building/running so it works when
 called from the repository root.
+
+It must build and run the program normally and use the machine's system date and
+time without overriding them.
 
 Do not create or modify repository-level entrance scripts.
 
@@ -65,30 +71,35 @@ Preserve the observable behavior, not incidental implementation structure.
 
 ## Conformance
 
-After writing the target project, run:
+After writing the target project, ask the already-running oracle to check it:
 
 ```sh
-uv run python -m semantic_drift conform $TARGET_PROJECT_DIR
+curl -sS -X POST http://127.0.0.1:8899/conform
 ```
 
+This endpoint is the authoritative conformance check. You may also run `run.sh`
+directly to diagnose build or runtime failures. Do not override the system clock
+or restructure the runtime command for the harness.
+
 If conformance fails, inspect stdout/stderr, repair the target project, and run
-the same command again. Continue until it passes or until you hit a real blocker.
+the same command again. Continue until the JSON response reports `"passed": true`
+or until you hit a real blocker.
 
-Do not change the source project, todos API, seed expected output, conformance
-harness, or this prompt to make the target pass. Do not inspect fixtures as a way
-to hard-code the answer; translate the source behavior and use conformance only
-as feedback.
+Do not change the source project, todos API, conformance harness, or this prompt
+to make the target pass. Do not inspect fixtures as a way to hard-code the
+answer; translate the source behavior and use conformance only as feedback.
 
-Make the code as idiomatic as possible - that includes using common libraries for
-tasks, instead of just relying on the standard library. Use the most popular build
-tool or project management for the language too, if required.
+Use idiomatic, mainstream ecosystem libraries rather than lower-level standard
+library facilities when a widely adopted library exists for the task. Do not
+avoid dependencies merely to make the project self-contained.
 
-Try to use libraries when they make sense, instead of rolling your own implementation.
+Declare dependencies using the target language's conventional project tooling,
+and make `run.sh` install or resolve them reproducibly before running.
 
 ## Deliverable
 
 When finished, report:
 
 - files created or changed under `$TARGET_PROJECT_DIR`
-- the final conformance command
+- the final oracle command
 - whether it passed

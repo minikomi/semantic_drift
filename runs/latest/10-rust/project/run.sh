@@ -7,5 +7,5 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cd "$(dirname "$0")"
-export RUSTC="$(rustup which rustc)"
-exec "$(rustup which cargo)" run --quiet -- "$1"
+
+cargo run --quiet -- "$1"

@@ -11,7 +11,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
-  httparty (~> 0.21.0)
+  httparty (= 0.21.0)
 
 BUNDLED WITH
    1.17.2

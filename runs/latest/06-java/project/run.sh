@@ -7,7 +7,5 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cd "$(dirname "$0")"
-if [ ! -f target/semantic-drift-todos-1.0.0.jar ]; then
-  mvn -q -DskipTests package >/dev/null 2>&1
-fi
-exec java -jar target/semantic-drift-todos-1.0.0.jar "$1"
+mvn -q -DskipTests package >/dev/null 2>&1
+exec java -jar target/todo-summary-1.0.0.jar "$1"

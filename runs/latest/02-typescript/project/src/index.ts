@@ -1,46 +1,39 @@
-interface Todo {
+import axios from "axios";
+import { format, isValid, parse } from "date-fns";
+
+type Todo = {
   userId: number;
   id: number;
   completed: boolean;
   dueDate: string;
-}
+};
 
-interface Summary {
+type Summary = {
   userId: number;
   completed: number;
   missed: number;
-}
+};
 
 function usage(): never {
   console.error(`usage: ${process.argv[1]} <todos-url>`);
   process.exit(1);
 }
 
-function parseDateOnly(value: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new Error(`parsing time "${value}" as "2006-01-02": cannot parse "${value}" as "2006"`);
+function fail(message: unknown): never {
+  if (message instanceof Error) {
+    console.error(message.message);
+  } else {
+    console.error(String(message));
   }
-
-  const [yearText, monthText, dayText] = value.split("-");
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    throw new Error(`parsing time "${value}": day out of range`);
-  }
-
-  return date;
+  process.exit(1);
 }
 
-function localStartOfToday(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+function parseDateOnlyInLocalTime(value: string, today: Date): Date {
+  const parsed = parse(value, "yyyy-MM-dd", today);
+  if (!isValid(parsed) || format(parsed, "yyyy-MM-dd") !== value) {
+    throw new Error(`parsing time "${value}" as "2006-01-02": cannot parse "${value}" as "2006"`);
+  }
+  return parsed;
 }
 
 async function main(): Promise<void> {
@@ -48,18 +41,27 @@ async function main(): Promise<void> {
     usage();
   }
 
-  const response = await fetch(process.argv[2], {
-    signal: AbortSignal.timeout(10_000),
-  });
+  const url = process.argv[2];
+  let todos: Todo[];
 
-  if (response.status < 200 || response.status >= 300) {
-    const statusText = response.statusText ? ` ${response.statusText}` : "";
-    console.error(`bad status: ${response.status}${statusText}`);
-    process.exit(1);
+  try {
+    const response = await axios.get<Todo[]>(url, {
+      timeout: 10_000,
+      responseType: "json",
+      validateStatus: () => true,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      fail(`bad status: ${response.status} ${response.statusText}`);
+    }
+
+    todos = response.data;
+  } catch (error) {
+    fail(error);
   }
 
-  const todos = (await response.json()) as Todo[];
-  const today = localStartOfToday();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const byUser = new Map<number, Summary>();
 
   for (const todo of todos) {
@@ -71,8 +73,16 @@ async function main(): Promise<void> {
 
     if (todo.completed) {
       summary.completed += 1;
-    } else if (parseDateOnly(todo.dueDate).getTime() < today.getTime()) {
-      summary.missed += 1;
+    } else {
+      let due: Date;
+      try {
+        due = parseDateOnlyInLocalTime(todo.dueDate, today);
+      } catch (error) {
+        fail(error);
+      }
+      if (due.getTime() < today.getTime()) {
+        summary.missed += 1;
+      }
     }
   }
 
@@ -92,7 +102,4 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+main().catch((error: unknown) => fail(error));

@@ -19,8 +19,6 @@ def test_first_go_iteration_matches_expected_output():
     except RuntimeError as exc:
         pytest.fail(str(exc))
 
-    log_step("checking exit code")
-    assert result.command.returncode == 0, result.command.stderr
-    log_step("comparing stdout with seed/expected.txt")
-    assert result.command.stdout == result.expected
+    log_step("checking oracle result")
+    assert result.passed, result.failure or result.command.stderr
     log_step("conformance passed")

@@ -7,4 +7,6 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cd "$(dirname "$0")"
-exec zig build run -- "$1"
+
+zig build --summary none
+exec ./.zig-cache/o/*/todo-summary "$1"

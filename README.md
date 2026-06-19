@@ -1,6 +1,6 @@
 # Semantic Drift
 
-Initial scaffold for the deterministic fake API used by the Semantic Drift harness.
+Initial scaffold for the fake API used by the Semantic Drift harness.
 
 ## Run
 
@@ -23,26 +23,24 @@ SEMANTIC_DRIFT_ADDR=127.0.0.1:9000 go run ./fake_api
 
 ## Conformance Tests
 
-The generated programs read the system clock directly. The pytest harness keeps
-time deterministic by running generated projects through `faketime` at:
+The generated programs, fake API, and conformance oracle all use the machine's
+current local date. The fixture uses dates from 1900 through 2999 so its expected
+result remains useful without replacing the system clock.
 
-```text
-2026-06-16 12:00:00
-```
-
-Install the test tools, then run:
+Run:
 
 ```sh
 uv run pytest
 ```
 
-The first test starts the Go fake API, runs:
+The first test starts the Go fake API configured for the project and requests:
 
 ```sh
-runs/latest/01-go/project/run.sh http://127.0.0.1:8899/todos
+POST http://127.0.0.1:8899/conform
 ```
 
-under `faketime`, and compares stdout exactly with `seed/expected.txt`.
+The fake API runs the project against `/todos`, calculates the expected output
+using its own system date, and compares stdout exactly.
 
 To check one generated project during an agent loop:
 
@@ -97,7 +95,7 @@ The child Codex process receives only the rendered prompt as its task prompt.
 Run the configured chain:
 
 ```text
-Go -> TypeScript -> Python -> Ruby -> Bash -> Java -> Haskell -> Common Lisp -> Zig -> Rust -> Go
+Go -> TypeScript -> Python -> Ruby -> C++ -> Java -> Haskell -> Common Lisp -> Zig -> Rust -> Go
 ```
 
 ```sh
@@ -111,7 +109,7 @@ runs/latest/01-go
 runs/latest/02-typescript
 runs/latest/03-python
 runs/latest/04-ruby
-runs/latest/05-bash
+runs/latest/05-cpp
 runs/latest/06-java
 runs/latest/07-haskell
 runs/latest/08-common-lisp

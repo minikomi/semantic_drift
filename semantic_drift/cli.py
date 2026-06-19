@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 
-from semantic_drift.conformance import TODOS_URL, check_project, log_step
+from semantic_drift.conformance import check_project, fake_api, log_step
 from semantic_drift.prompt import RewritePromptArgs, render_rewrite_prompt
 
 
@@ -40,12 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path.cwd(),
         help="repository root, defaults to current working directory",
     )
-    conform_parser.add_argument(
-        "--url",
-        default=TODOS_URL,
-        help=f"todos URL passed to the entrance, defaults to {TODOS_URL}",
-    )
-
     prompt_parser = subparsers.add_parser("prompt", help="render reusable LLM prompts")
     prompt_subparsers = prompt_parser.add_subparsers(dest="prompt_command")
     add_rewrite_prompt_args(
@@ -106,18 +100,16 @@ def conform(args: argparse.Namespace) -> int:
     project_dir = resolve_project_dir(repo_root, args.project_dir)
 
     log_step(f"repo root: {repo_root}")
-    result = check_project(repo_root, project_dir, args.url)
+    result = check_project(repo_root, project_dir)
 
     if result.command.returncode != 0:
         print("FAIL: generated project exited non-zero", file=sys.stderr)
         print(result.command.stderr, file=sys.stderr, end="")
         return 1
 
-    if result.command.stdout != result.expected:
-        print("FAIL: stdout did not match seed/expected.txt", file=sys.stderr)
-        print("--- expected ---", file=sys.stderr)
-        print(result.expected, file=sys.stderr, end="")
-        print("--- actual ---", file=sys.stderr)
+    if not result.passed:
+        print(f"FAIL: {result.failure}", file=sys.stderr)
+        print("--- stdout ---", file=sys.stderr)
         print(result.command.stdout, file=sys.stderr, end="")
         if result.command.stderr:
             print("--- stderr ---", file=sys.stderr)
@@ -160,7 +152,9 @@ def rewrite(args: argparse.Namespace) -> int:
     if args.model is not None:
         command[2:2] = ["--model", args.model]
 
-    return subprocess.run(command, cwd=repo_root, input=prompt_text, text=True).returncode
+    target_project = rewrite_prompt_args(args).target_project_dir
+    with fake_api(repo_root, target_project):
+        return subprocess.run(command, cwd=repo_root, input=prompt_text, text=True).returncode
 
 
 def rewrite_prompt_args(args: argparse.Namespace) -> RewritePromptArgs:

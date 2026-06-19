@@ -7,5 +7,5 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cd "$(dirname "$0")"
-bundle check >/dev/null 2>&1 || bundle install --quiet
-exec bundle exec ruby -rbundler/setup -Ilib -r semantic_drift_todos -e 'SemanticDriftTodos.main(ARGV)' "$1"
+bundle install --quiet --path vendor/bundle
+exec bundle exec ruby lib/main.rb "$1"

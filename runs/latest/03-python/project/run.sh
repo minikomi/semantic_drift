@@ -7,5 +7,10 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cd "$(dirname "$0")"
-exec uv run --quiet python -m semantic_drift_todos "$1"
+if [ ! -d .venv ]; then
+  python3 -m venv .venv
+fi
+. .venv/bin/activate
+pip install --disable-pip-version-check --quiet -r requirements.txt
+exec python -m src.main "$1"
 

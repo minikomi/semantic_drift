@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.semanticdrift</groupId>
-  <artifactId>semantic-drift-todos</artifactId>
+  <artifactId>todo-summary</artifactId>
   <version>1.0.0</version>
 
   <properties>
@@ -30,6 +30,11 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
         <version>3.6.0</version>
         <executions>
@@ -39,10 +44,9 @@
               <goal>shade</goal>
             </goals>
             <configuration>
-              <createDependencyReducedPom>false</createDependencyReducedPom>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>com.semanticdrift.todos.App</mainClass>
+                  <mainClass>com.semanticdrift.TodoSummary</mainClass>
                 </transformer>
               </transformers>
             </configuration>

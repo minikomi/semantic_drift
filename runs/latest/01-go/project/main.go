@@ -61,7 +61,7 @@ func main() {
 		if t.Completed {
 			s.Completed++
 		} else {
-			due, err := time.Parse(time.DateOnly, t.DueDate)
+			due, err := time.ParseInLocation(time.DateOnly, t.DueDate, today.Location())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)

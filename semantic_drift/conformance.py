@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json
 from pathlib import Path
-import shutil
 import subprocess
 import time
 import urllib.request
 
 
-REFERENCE_DATETIME = "2026-06-16 12:00:00"
 API_ADDR = "127.0.0.1:8899"
 API_ROOT = f"http://{API_ADDR}"
-TODOS_URL = f"{API_ROOT}/todos"
 
 
 @dataclass(frozen=True)
@@ -25,34 +23,27 @@ class CommandResult:
 @dataclass(frozen=True)
 class ConformanceResult:
     command: CommandResult
-    expected: str
-
-    @property
-    def passed(self) -> bool:
-        return self.command.returncode == 0 and self.command.stdout == self.expected
+    passed: bool
+    failure: str
 
 
 def log_step(message: str) -> None:
     print(f"[semantic-drift] {message}", flush=True)
 
 
-def require_faketime() -> str:
-    log_step("checking for faketime")
-    faketime = shutil.which("faketime")
-    if faketime is None:
-        raise RuntimeError(
-            "faketime is required for deterministic conformance tests. "
-            "Install libfaketime/faketime and rerun pytest."
-        )
-    log_step(f"using faketime at {faketime}")
-    return faketime
-
-
 @contextmanager
-def fake_api(repo_root: Path):
+def fake_api(repo_root: Path, project_dir: Path):
     log_step(f"starting fake API on http://{API_ADDR}")
     process = subprocess.Popen(
-        ["go", "run", "./fake_api"],
+        [
+            "go",
+            "run",
+            "./fake_api",
+            "--repo-root",
+            str(repo_root),
+            "--project",
+            str(project_dir),
+        ],
         cwd=repo_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -82,7 +73,8 @@ def wait_for_health(timeout: float = 10.0) -> None:
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(f"{API_ROOT}/health", timeout=0.25) as response:
-                if response.status == 200:
+                payload = json.load(response)
+                if response.status == 200 and payload.get("conformanceEnabled") is True:
                     return
         except OSError as exc:
             last_error = exc
@@ -92,50 +84,28 @@ def wait_for_health(timeout: float = 10.0) -> None:
     raise RuntimeError(f"fake API did not become healthy{detail}")
 
 
-def run_with_frozen_time(
-    repo_root: Path,
-    project_dir: Path,
-    url: str = TODOS_URL,
-) -> CommandResult:
-    faketime = require_faketime()
-    run_script = project_dir / "run.sh"
-    if not run_script.is_file():
-        raise RuntimeError(f"project is missing run script: {run_script}")
+def request_conformance() -> ConformanceResult:
+    log_step("requesting POST /conform")
+    request = urllib.request.Request(f"{API_ROOT}/conform", method="POST")
+    with urllib.request.urlopen(request, timeout=25) as response:
+        payload = json.load(response)
 
-    log_step(f"running project under frozen time {REFERENCE_DATETIME}")
-    log_step(f"project: {project_dir}")
-    log_step(f"script: {run_script}")
-    log_step(f"url: {url}")
-    completed = subprocess.run(
-        [
-            faketime,
-            REFERENCE_DATETIME,
-            str(run_script),
-            url,
-        ],
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=20,
+    command = CommandResult(
+        returncode=payload["exitCode"],
+        stdout=payload.get("stdout", ""),
+        stderr=payload.get("stderr", ""),
     )
-    log_step(f"project exited with code {completed.returncode}")
-    return CommandResult(
-        returncode=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
+    log_step(f"project exited with code {command.returncode}")
+    return ConformanceResult(
+        command=command,
+        passed=payload["passed"],
+        failure=payload.get("failure", ""),
     )
 
 
 def check_project(
     repo_root: Path,
     project_dir: Path,
-    url: str = TODOS_URL,
 ) -> ConformanceResult:
-    log_step("loading expected output")
-    expected = (repo_root / "seed/expected.txt").read_text()
-
-    with fake_api(repo_root):
-        command = run_with_frozen_time(repo_root, project_dir, url)
-
-    return ConformanceResult(command=command, expected=expected)
+    with fake_api(repo_root, project_dir):
+        return request_conformance()

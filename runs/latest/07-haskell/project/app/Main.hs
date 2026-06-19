@@ -1,49 +1,40 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
 import Control.Exception (SomeException, catch)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Char8 as BS8
 import Data.Char (isDigit)
 import Data.List (sortBy)
-import qualified Data.Scientific as Scientific
+import qualified Data.Map.Strict as Map
+import Data.Scientific (floatingOrInteger, toRealFloat)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as Vector
-import Data.Time
-  ( Day
-  , LocalTime (LocalTime)
-  , TimeOfDay (TimeOfDay)
-  , UTCTime
-  , ZonedTime
-  , defaultTimeLocale
-  , getZonedTime
-  , localTimeToUTC
-  , minutesToTimeZone
-  , parseTimeM
-  , zonedTimeToUTC
-  , zonedTimeToLocalTime
-  )
-import Data.Time.Calendar (fromGregorianValid)
+import Data.Time.Calendar (Day, fromGregorianValid)
+import Data.Time.Clock (getCurrentTime)
+import Data.Time.LocalTime (getCurrentTimeZone, localDay, utcToLocalTime)
 import Network.HTTP.Client
-  ( httpLbs
+  ( ManagerSettings
+  , Response
+  , httpLbs
   , method
   , newManager
   , parseRequest
   , responseBody
   , responseStatus
+  , responseTimeout
+  , responseTimeoutMicro
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode, statusMessage)
-import System.Environment (getArgs)
-import System.Exit (exitWith, ExitCode (ExitFailure, ExitSuccess))
+import Numeric (showEFloat, showFFloat)
+import System.Environment (getArgs, getProgName)
+import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
-import System.Process (readProcessWithExitCode)
-import Text.Printf (printf)
 
 data Summary = Summary
   { summaryUserId :: Aeson.Value
@@ -54,163 +45,211 @@ data Summary = Summary
 main :: IO ()
 main = do
   args <- getArgs
-  code <- run args `catch` \(err :: SomeException) -> do
-    let msg = show err
-    putStrLnErr msg
-    pure 1
-  exitWith $ if code == 0 then ExitSuccess else ExitFailure code
+  case args of
+    [url] -> run url `catch` reportException
+    _ -> do
+      prog <- getProgName
+      hPutStrLn stderr ("usage: " <> prog <> " <todos-url>")
+      exitFailure
 
-run :: [String] -> IO Int
-run [url] = do
-  manager <- newManager tlsManagerSettings
-  request <- parseRequest url
-  response <- httpLbs request { method = "GET" } manager
+run :: String -> IO ()
+run url = do
+  response <- httpGet url
   let status = responseStatus response
       code = statusCode status
+      reason = BS8.unpack (statusMessage status)
   if code < 200 || code >= 300
-    then do
-      let reason = TE.decodeUtf8 (statusMessage status)
-          suffix = if T.null reason then "" else " " <> T.unpack reason
-      putStrLnErr $ "bad status: " <> show code <> suffix
-      pure 1
-    else do
-      todos <- decodeTodos (responseBody response)
-      today <- localStartOfToday
-      let rows = summarize today todos
-      putStrLn "USER  COMPLETED  MISSED"
-      mapM_ printSummary rows
-      pure 0
-run _ = do
-  putStrLnErr "usage: ./run.sh <url>"
-  pure 2
+    then failWith ("bad status: " <> show code <> if null reason then "" else " " <> reason)
+    else pure ()
 
-decodeTodos :: LBS.ByteString -> IO [KeyMap.KeyMap Aeson.Value]
-decodeTodos body =
-  case Aeson.eitherDecode body of
-    Left err -> fail err
-    Right values -> pure values
+  todos <- case Aeson.eitherDecode (responseBody response) of
+    Right value -> pure value
+    Left message -> failWith message
+  today <- todayLocal
+  summaries <- foldTodos today todos
+  let rows = sortBy compareSummary (Map.elems summaries)
+  putStrLn "USER  COMPLETED  MISSED"
+  mapM_ printRow rows
 
-summarize :: UTCTime -> [KeyMap.KeyMap Aeson.Value] -> [Summary]
-summarize today todos =
-  sortBy compareSummary $ map snd final
+reportException :: SomeException -> IO ()
+reportException err = failWith (show err)
+
+failWith :: String -> IO a
+failWith message = do
+  hPutStrLn stderr message
+  exitFailure
+
+httpGet :: String -> IO (Response LBS.ByteString)
+httpGet url = do
+  request <- parseRequest url
+  manager <- newManager settings
+  httpLbs request { method = "GET", responseTimeout = responseTimeoutMicro (10 * 1000 * 1000) } manager
   where
-    final = foldl' step [] todos
+    settings :: ManagerSettings
+    settings = tlsManagerSettings
 
-    step acc todo =
-      let userId = lookupDefault "userId" todo
-          key = stringify userId
-          existing = maybe (Summary userId 0 0) id (lookup key acc)
-          updated =
-            if isTruthy (lookupDefault "completed" todo)
-              then existing { summaryCompleted = summaryCompleted existing + 1 }
-              else
-                let due = parseDateOnly (stringify (lookupDefault "dueDate" todo))
-                 in if due < today
-                      then existing { summaryMissed = summaryMissed existing + 1 }
-                      else existing
-       in upsert key updated acc
+foldTodos :: Day -> Aeson.Value -> IO (Map.Map String Summary)
+foldTodos today (Aeson.Array todos) =
+  Vector.foldM' addTodo Map.empty todos
+  where
+    addTodo byUser todo = do
+      userId <- required todo "userId"
+      completed <- required todo "completed"
+      dueDate <- required todo "dueDate"
+      let key = jsonKey userId
+          current = Map.findWithDefault (Summary userId 0 0) key byUser
+      updated <-
+        if asBoolean completed
+          then pure current { summaryCompleted = summaryCompleted current + 1 }
+          else do
+            due <- parseDateOnlyInLocalTime (asText dueDate)
+            pure
+              current
+                { summaryMissed =
+                    summaryMissed current + if due < today then 1 else 0
+                }
+      pure (Map.insert key updated byUser)
+foldTodos _ _ = failWith "expected JSON array"
 
-lookupDefault :: Key.Key -> KeyMap.KeyMap Aeson.Value -> Aeson.Value
-lookupDefault key = maybe Aeson.Null id . KeyMap.lookup key
+required :: Aeson.Value -> T.Text -> IO Aeson.Value
+required (Aeson.Object object) field =
+  case KeyMap.lookup (AesonKey.fromText field) object of
+    Just value -> pure value
+    Nothing -> failWith ("key '" <> T.unpack field <> "' not found")
+required _ field = failWith ("key '" <> T.unpack field <> "' not found")
 
-upsert :: String -> Summary -> [(String, Summary)] -> [(String, Summary)]
-upsert key summary [] = [(key, summary)]
-upsert key summary ((existingKey, existingSummary):rest)
-  | key == existingKey = (key, summary) : rest
-  | otherwise = (existingKey, existingSummary) : upsert key summary rest
+jsonKey :: Aeson.Value -> String
+jsonKey = BS8.unpack . LBS.toStrict . Aeson.encode
+
+displayValue :: Aeson.Value -> String
+displayValue (Aeson.String value) = T.unpack value
+displayValue (Aeson.Number value) =
+  case floatingOrInteger value :: Either Double Integer of
+    Right integer -> show integer
+    Left double -> cppDefaultDoubleString double
+displayValue (Aeson.Bool value) = if value then "true" else "false"
+displayValue Aeson.Null = ""
+displayValue value = jsonKey value
+
+asBoolean :: Aeson.Value -> Bool
+asBoolean (Aeson.Bool value) = value
+asBoolean (Aeson.String "true") = True
+asBoolean (Aeson.Number 1) = True
+asBoolean _ = False
+
+asText :: Aeson.Value -> String
+asText (Aeson.String value) = T.unpack value
+asText (Aeson.Number value) =
+  case floatingOrInteger value :: Either Double Integer of
+    Right integer -> show integer
+    Left double -> cppDefaultDoubleString double
+asText (Aeson.Bool value) = if value then "true" else "false"
+asText Aeson.Null = ""
+asText value = jsonKey value
 
 compareSummary :: Summary -> Summary -> Ordering
-compareSummary left right =
-  compare (summaryCompleted right) (summaryCompleted left)
-    <> compare (summaryMissed right) (summaryMissed left)
-    <> comparePhpValues (summaryUserId left) (summaryUserId right)
+compareSummary a b =
+  compare (summaryCompleted b) (summaryCompleted a)
+    <> compare (summaryMissed b) (summaryMissed a)
+    <> compareUserId (summaryUserId a) (summaryUserId b)
 
-printSummary :: Summary -> IO ()
-printSummary summary =
-  printf "%-5s %-10d %d\n"
-    (stringify (summaryUserId summary))
-    (summaryCompleted summary)
-    (summaryMissed summary)
+compareUserId :: Aeson.Value -> Aeson.Value -> Ordering
+compareUserId (Aeson.Number a) (Aeson.Number b) =
+  compare (toRealFloat a :: Double) (toRealFloat b :: Double)
+compareUserId (Aeson.String a) (Aeson.String b) = compare a b
+compareUserId (Aeson.Bool a) (Aeson.Bool b) = compare a b
+compareUserId a b = compare (jsonKey a) (jsonKey b)
 
-isTruthy :: Aeson.Value -> Bool
-isTruthy Aeson.Null = False
-isTruthy (Aeson.Bool b) = b
-isTruthy (Aeson.Number n) = n /= 0
-isTruthy value = not (null (stringify value))
-
-stringify :: Aeson.Value -> String
-stringify Aeson.Null = ""
-stringify (Aeson.Bool True) = "true"
-stringify (Aeson.Bool False) = "false"
-stringify (Aeson.String text) = T.unpack text
-stringify (Aeson.Number n) =
-  case Scientific.floatingOrInteger n :: Either Double Integer of
-    Right i -> show i
-    Left _ -> Scientific.formatScientific Scientific.Generic Nothing n
-stringify (Aeson.Array values) = "[" <> joinWith ", " (map stringify (Vector.toList values)) <> "]"
-stringify (Aeson.Object object) =
-  "{" <> joinWith ", " (map renderPair (KeyMap.toList object)) <> "}"
-  where
-    renderPair (key, value) = T.unpack (Key.toText key) <> "=" <> stringify value
-
-comparePhpValues :: Aeson.Value -> Aeson.Value -> Ordering
-comparePhpValues (Aeson.Number left) (Aeson.Number right) = compare left right
-comparePhpValues left right = compare (stringify left) (stringify right)
-
-parseDateOnly :: String -> UTCTime
-parseDateOnly value
-  | not (looksDateOnly value) =
-      error $ "parsing time \"" <> value <> "\" as \"2006-01-02\": cannot parse \"" <> value <> "\" as \"2006\""
-  | year < 1 || year > 9999 =
-      error $ "year " <> show year <> " is out of range"
-  | month < 1 || month > 12 =
-      error "month must be in 1..12"
+cppDefaultDoubleString :: Double -> String
+cppDefaultDoubleString value
+  | isNaN value = "nan"
+  | isInfinite value = if value > 0 then "inf" else "-inf"
+  | absValue /= 0.0 && (absValue < 0.0001 || absValue >= 1000000.0) =
+      formatScientific value
   | otherwise =
-      case fromGregorianValid (fromIntegral year) month day of
-        Nothing -> error $ "parsing time \"" <> value <> "\": day out of range"
-        Just date -> localTimeToUTC utc (LocalTime date midnight)
+      trimFraction (showFFloat (Just 5) value "")
   where
-    year = read (take 4 value) :: Int
-    month = read (take 2 (drop 5 value)) :: Int
-    day = read (take 2 (drop 8 value)) :: Int
-    midnight = TimeOfDay 0 0 0
-    utc = minutesToTimeZone 0
+    absValue = abs value
 
-looksDateOnly :: String -> Bool
-looksDateOnly value =
-  length value == 10
-    && all isDigit (take 4 value)
-    && value !! 4 == '-'
-    && all isDigit (take 2 (drop 5 value))
-    && value !! 7 == '-'
-    && all isDigit (drop 8 value)
+formatScientific :: Double -> String
+formatScientific value =
+  normalizeExponent (lowerE (trimMantissa rendered))
+  where
+    rendered = showEFloat (Just 5) value ""
 
-localStartOfToday :: IO UTCTime
-localStartOfToday = do
-  (_exitCode, stdoutText, _stderrText) <- readProcessWithExitCode "date" ["+%Y-%m-%dT00:00:00%z"] ""
-  case parseDateOutput (trim stdoutText) of
-    Just time -> pure time
-    Nothing -> do
-      zoned <- getZonedTime
-      let day = localDayFromZoned zoned
-      pure $ zonedTimeToUTC zoned { zonedTimeToLocalTime = LocalTime day (TimeOfDay 0 0 0) }
+trimMantissa :: String -> String
+trimMantissa input =
+  case break (== 'e') input of
+    (mantissa, exponentPart) -> trimFraction mantissa <> exponentPart
 
-parseDateOutput :: String -> Maybe UTCTime
-parseDateOutput =
-  parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z"
+lowerE :: String -> String
+lowerE = map (\c -> if c == 'E' then 'e' else c)
 
-localDayFromZoned :: ZonedTime -> Day
-localDayFromZoned zoned =
-  case zonedTimeToLocalTime zoned of
-    LocalTime day _ -> day
+normalizeExponent :: String -> String
+normalizeExponent input =
+  case break (== 'e') input of
+    (_, "") -> input
+    (mantissa, _ : exponentPart) ->
+      let (sign, digits) =
+            case exponentPart of
+              '+' : rest -> ("+", rest)
+              '-' : rest -> ("-", rest)
+              rest -> ("+", rest)
+          stripped = dropLeadingZeros digits
+       in mantissa <> "e" <> sign <> stripped
 
-joinWith :: String -> [String] -> String
-joinWith _ [] = ""
-joinWith _ [x] = x
-joinWith sep (x:xs) = x <> sep <> joinWith sep xs
+dropLeadingZeros :: String -> String
+dropLeadingZeros digits =
+  case dropWhile (== '0') digits of
+    "" -> "0"
+    rest -> rest
 
-trim :: String -> String
-trim = reverse . dropWhile (`elem` ['\n', '\r', ' ', '\t']) . reverse . dropWhile (`elem` ['\n', '\r', ' ', '\t'])
+trimFraction :: String -> String
+trimFraction input =
+  case break (== '.') input of
+    (_, "") -> input
+    (whole, _ : frac) ->
+      let trimmed = reverse (dropWhile (== '0') (reverse frac))
+       in if null trimmed then whole else whole <> "." <> trimmed
 
-putStrLnErr :: String -> IO ()
-putStrLnErr = hPutStrLn stderr
+parseDateOnlyInLocalTime :: String -> IO Day
+parseDateOnlyInLocalTime value = do
+  let shapeOk =
+        length value == 10
+          && value !! 4 == '-'
+          && value !! 7 == '-'
+          && all digitAt [0 .. 9]
+      digitAt index = index == 4 || index == 7 || isDigit (value !! index)
+  if not shapeOk
+    then failWith (parseErrorMessage value)
+    else do
+      let year = read (take 4 value)
+          month = read (take 2 (drop 5 value))
+          day = read (drop 8 value)
+      case fromGregorianValid year month day of
+        Just parsed -> pure parsed
+        Nothing -> failWith (parseErrorMessage value)
+
+parseErrorMessage :: String -> String
+parseErrorMessage value =
+  "parsing time \"" <> value <> "\" as \"2006-01-02\": cannot parse \"" <> value <> "\" as \"2006\""
+
+todayLocal :: IO Day
+todayLocal = do
+  now <- getCurrentTime
+  zone <- getCurrentTimeZone
+  pure (localDay (utcToLocalTime zone now))
+
+printRow :: Summary -> IO ()
+printRow row =
+  putStrLn
+    ( padRight 5 (displayValue (summaryUserId row))
+        <> " "
+        <> padRight 10 (show (summaryCompleted row))
+        <> " "
+        <> show (summaryMissed row)
+    )
+
+padRight :: Int -> String -> String
+padRight width value =
+  value <> replicate (max 0 (width - length value)) ' '
