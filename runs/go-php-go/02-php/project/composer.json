@@ -1,0 +1,14 @@
+{
+  "name": "semantic-drift/iteration-02-php",
+  "description": "PHP translation of the semantic drift todo summarizer",
+  "type": "project",
+  "require": {
+    "php": ">=8.2",
+    "guzzlehttp/guzzle": "^7.9"
+  },
+  "autoload": {
+    "psr-4": {
+      "SemanticDrift\\\\": "src/"
+    }
+  }
+}

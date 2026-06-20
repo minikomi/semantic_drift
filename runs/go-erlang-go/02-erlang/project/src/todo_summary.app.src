@@ -1,0 +1,8 @@
+{application, todo_summary,
+ [{description, "Todo summary"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [kernel, stdlib, ssl, inets, hackney, jsx]},
+  {env, []},
+  {modules, [todo_summary]}]}.
+
