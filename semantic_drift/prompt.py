@@ -12,6 +12,8 @@ class RewritePromptArgs:
     target_language: str
     source_dir: Path
     target_dir: Path
+    check_command: str
+    prompt_variant: str = "original"
 
     @property
     def source_project_dir(self) -> Path:
@@ -23,16 +25,21 @@ class RewritePromptArgs:
 
 
 def render_rewrite_prompt(args: RewritePromptArgs) -> str:
-    template_path = args.repo_root / "prompts" / "rewrite.md"
+    prompt_files = {
+        "original": "rewrite.md",
+        "neutral": "rewrite-neutral.md",
+    }
+    template_path = args.repo_root / "prompts" / prompt_files[args.prompt_variant]
     template = Template(template_path.read_text())
     return template.substitute(
-        REPO_ROOT=str(args.repo_root),
         SOURCE_LANGUAGE=args.source_language,
         TARGET_LANGUAGE=args.target_language,
         SOURCE_DIR=str(args.source_dir),
         SOURCE_PROJECT_DIR=str(args.source_project_dir),
         TARGET_DIR=str(args.target_dir),
         TARGET_PROJECT_DIR=str(args.target_project_dir),
+        CHECK_COMMAND=args.check_command,
+        REPO_ROOT=str(args.repo_root),
     )
 
 

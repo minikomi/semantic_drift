@@ -65,10 +65,22 @@ runs/latest/<step>/project/run.sh <url>
 
 ## Rewrite Prompt
 
+Two prompt conditions are retained as separate files:
+
+- `prompts/rewrite.md` is the original prompt, including experiment terminology
+  and the instruction to prefer mainstream ecosystem libraries.
+- `prompts/rewrite-neutral.md` is the second prompt used by isolated chain runs;
+  it removes experiment labels and library-selection guidance.
+
+The prompt CLI defaults to `original`. Select the second condition with
+`--prompt-variant neutral`. The full-chain script defaults to `neutral`; override
+it with `PROMPT_VARIANT=original`.
+
 Render the reusable prompt without running an agent:
 
 ```sh
 uv run python -m semantic_drift prompt rewrite \
+  --prompt-variant neutral \
   --source-language Go \
   --target-language TypeScript \
   --source-dir runs/latest/01-go \
@@ -79,6 +91,7 @@ Run a fresh Codex instance with that same prompt:
 
 ```sh
 uv run python -m semantic_drift rewrite \
+  --prompt-variant neutral \
   --source-language Go \
   --target-language TypeScript \
   --source-dir runs/latest/01-go \
@@ -111,18 +124,21 @@ Go -> TypeScript -> Python -> Ruby -> C++ -> Java -> Haskell -> Common Lisp -> Z
 scripts/run_chain.sh
 ```
 
-The script stops on the first rewrite or conformance failure. It writes steps to:
+The script stops on the first rewrite or verification failure. By default it
+writes steps to a timestamped directory under `runs/`. Set `RUN_DIR` to choose
+an explicit new archive directory:
 
-```text
-runs/latest/01-go
-runs/latest/02-typescript
-runs/latest/03-python
-runs/latest/04-ruby
-runs/latest/05-cpp
-runs/latest/06-java
-runs/latest/07-haskell
-runs/latest/08-common-lisp
-runs/latest/09-zig
-runs/latest/10-rust
-runs/latest/11-go
+```sh
+RUN_DIR=runs/control-01 scripts/run_chain.sh
 ```
+
+Resume an interrupted chain without rerunning archived steps:
+
+```sh
+RESUME=1 RUN_DIR=runs/control-01 scripts/run_chain.sh
+```
+
+Each translation runs in a separate neutral temporary workspace containing
+only its immediate source project, an empty target location, and the verification
+helper. Repository names, historical runs, archive paths, and orchestration
+package names are not exposed to the child process.

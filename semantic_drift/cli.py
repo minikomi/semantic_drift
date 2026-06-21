@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -106,6 +107,23 @@ def add_rewrite_prompt_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--target-dir", required=True, type=Path)
     parser.add_argument(
+        "--check-command",
+        default="python3 scripts/verify_project.py",
+        help="verification command inserted into the translation prompt",
+    )
+    parser.add_argument(
+        "--prompt-variant",
+        choices=["original", "neutral"],
+        default="original",
+        help="prompt condition to render or run",
+    )
+    parser.add_argument(
+        "--agent-workspace",
+        type=Path,
+        default=None,
+        help="working directory exposed to the child agent",
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=Path.cwd(),
@@ -157,12 +175,15 @@ def rewrite(args: argparse.Namespace) -> int:
         return 127
 
     repo_root = args.repo_root.resolve()
+    agent_workspace = (
+        args.agent_workspace.absolute() if args.agent_workspace is not None else repo_root
+    )
     prompt_text = render_rewrite_prompt(rewrite_prompt_args(args))
     command = [
         codex_bin,
         "exec",
         "--cd",
-        str(repo_root),
+        str(agent_workspace),
         "--skip-git-repo-check",
         "-",
     ]
@@ -173,8 +194,38 @@ def rewrite(args: argparse.Namespace) -> int:
     if args.model is not None:
         command[2:2] = ["--model", args.model]
 
+    child_env = sanitized_agent_environment(repo_root, agent_workspace)
     with fake_api(repo_root):
-        return subprocess.run(command, cwd=repo_root, input=prompt_text, text=True).returncode
+        return subprocess.run(
+            command,
+            cwd=agent_workspace,
+            env=child_env,
+            input=prompt_text,
+            text=True,
+        ).returncode
+
+
+def sanitized_agent_environment(repo_root: Path, agent_workspace: Path) -> dict[str, str]:
+    repo_text = str(repo_root)
+    environment: dict[str, str] = {}
+
+    for key, value in os.environ.items():
+        label = key.lower().replace("_", "-")
+        if "semantic-drift" in label or repo_text in value:
+            continue
+        environment[key] = value
+
+    path_parts = [
+        part
+        for part in os.environ.get("PATH", "").split(os.pathsep)
+        if part and repo_text not in part
+    ]
+    environment["PATH"] = os.pathsep.join(path_parts)
+    environment["PWD"] = str(agent_workspace)
+    environment.pop("OLDPWD", None)
+    environment.pop("VIRTUAL_ENV", None)
+    environment.pop("PYTHONPATH", None)
+    return environment
 
 
 def rewrite_prompt_args(args: argparse.Namespace) -> RewritePromptArgs:
@@ -185,6 +236,8 @@ def rewrite_prompt_args(args: argparse.Namespace) -> RewritePromptArgs:
         target_language=args.target_language,
         source_dir=resolve_project_parent(repo_root, args.source_dir),
         target_dir=resolve_project_parent(repo_root, args.target_dir),
+        check_command=args.check_command,
+        prompt_variant=args.prompt_variant,
     )
 
 

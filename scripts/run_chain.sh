@@ -3,6 +3,25 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+run_dir=${RUN_DIR:-"runs/run-$(date +%Y%m%d-%H%M%S)"}
+baseline_dir=${BASELINE_DIR:-runs/latest/01-go/project}
+resume=${RESUME:-0}
+prompt_variant=${PROMPT_VARIANT:-neutral}
+
+if [[ -e "$run_dir" ]]; then
+  if [[ "$resume" != "1" ]]; then
+    printf 'output directory already exists: %s\n' "$run_dir" >&2
+    printf 'set RESUME=1 to continue that chain\n' >&2
+    exit 2
+  fi
+elif [[ "$resume" == "1" ]]; then
+  printf 'cannot resume missing output directory: %s\n' "$run_dir" >&2
+  exit 2
+else
+  mkdir -p "$run_dir/01-go"
+  cp -R "$baseline_dir" "$run_dir/01-go/project"
+fi
+
 languages=(
   "Go"
   "TypeScript"
@@ -36,25 +55,39 @@ for ((i = 0; i < ${#steps[@]} - 1; i++)); do
   target_language=${languages[$((i + 1))]}
   source_step=${steps[$i]}
   target_step=${steps[$((i + 1))]}
-  source_dir="runs/latest/${source_step}"
-  target_dir="runs/latest/${target_step}"
+  archived_target="${run_dir}/${target_step}/project"
+
+  if [[ "$resume" == "1" && -f "$archived_target/run.sh" ]]; then
+    printf '\n==> %s -> %s (%s -> %s)\n' \
+      "$source_language" "$target_language" "$source_step" "$target_step"
+    printf '    already archived; skipping\n'
+    continue
+  fi
+
+  work_dir=$(mktemp -d /tmp/work.XXXXXX)
+  source_dir="${work_dir}/input"
+  target_dir="${work_dir}/output"
   target_project="${target_dir}/project"
+  mkdir -p "$source_dir"
+  cp -R "${run_dir}/${source_step}/project" "$source_dir/project"
+  cp scripts/verify_project.py "$work_dir/verify.py"
 
   printf '\n==> %s -> %s (%s -> %s)\n' \
     "$source_language" "$target_language" "$source_step" "$target_step"
-
-  if [[ -f "${target_project}/run.sh" ]]; then
-    printf '    skipping: %s already exists\n' "$target_project"
-    continue
-  fi
 
   uv run python -m semantic_drift rewrite \
     --source-language "$source_language" \
     --target-language "$target_language" \
     --source-dir "$source_dir" \
-    --target-dir "$target_dir"
+    --target-dir "$target_dir" \
+    --agent-workspace "$work_dir" \
+    --prompt-variant "$prompt_variant" \
+    --check-command "python3 $work_dir/verify.py"
 
   uv run python -m semantic_drift conform "$target_project"
+  mkdir -p "${run_dir}/${target_step}"
+  cp -R "$target_project" "${run_dir}/${target_step}/project"
+  rm -rf "$work_dir"
 done
 
-printf '\nSemantic Drift chain complete.\n'
+printf '\nTranslation chain complete: %s\n' "$run_dir"
