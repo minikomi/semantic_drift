@@ -2,35 +2,26 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
-	"sync"
 	"time"
 )
 
 const defaultAddr = "127.0.0.1:8899"
 
 type conformanceRunner struct {
-	repoRoot string
-	project  string
 	expected []byte
-	mu       sync.Mutex
 }
 
 type conformanceResponse struct {
-	Passed   bool   `json:"passed"`
-	ExitCode int    `json:"exitCode"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
-	Failure  string `json:"failure,omitempty"`
+	Passed  bool   `json:"passed"`
+	Failure string `json:"failure,omitempty"`
 }
 
 type Todo struct {
@@ -186,20 +177,17 @@ var todos = []Todo{
 
 func main() {
 	addr := flag.String("addr", envOrDefault("SEMANTIC_DRIFT_ADDR", defaultAddr), "listen address")
-	repoRoot := flag.String("repo-root", ".", "repository root")
-	project := flag.String("project", "", "fixed project directory enabled for POST /conform")
 	flag.Parse()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler(*project != ""))
-	mux.HandleFunc("GET /todos", todosHandler)
-	if *project != "" {
-		runner, err := newConformanceRunner(*repoRoot, *project)
-		if err != nil {
-			log.Fatal(err)
-		}
-		mux.HandleFunc("POST /conform", runner.handle)
+	runner, err := newConformanceRunner()
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("GET /todos", todosHandler)
+	mux.HandleFunc("POST /conform", runner.handle)
 
 	server := &http.Server{
 		Addr:              *addr,
@@ -213,65 +201,28 @@ func main() {
 	}
 }
 
-func newConformanceRunner(repoRoot, project string) (*conformanceRunner, error) {
-	repoRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve repository root: %w", err)
-	}
-	project, err = filepath.Abs(project)
-	if err != nil {
-		return nil, fmt.Errorf("resolve project directory: %w", err)
-	}
+func newConformanceRunner() (*conformanceRunner, error) {
 	expected, err := expectedOutput(todos, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("calculate expected output: %w", err)
 	}
-	return &conformanceRunner{
-		repoRoot: repoRoot,
-		project:  project,
-		expected: expected,
-	}, nil
+	return &conformanceRunner{expected: expected}, nil
 }
 
-func (runner *conformanceRunner) handle(w http.ResponseWriter, _ *http.Request) {
-	runner.mu.Lock()
-	defer runner.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	runScript := filepath.Join(runner.project, "run.sh")
-	command := exec.CommandContext(
-		ctx,
-		runScript,
-		"http://127.0.0.1:8899/todos",
-	)
-	command.Dir = runner.repoRoot
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-
-	exitCode := -1
-	if command.ProcessState != nil {
-		exitCode = command.ProcessState.ExitCode()
-	}
-	response := conformanceResponse{
-		Passed:   err == nil && bytes.Equal(stdout.Bytes(), runner.expected),
-		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-	}
-	if ctx.Err() == context.DeadlineExceeded {
-		response.Failure = "project timed out"
-	} else if err != nil {
-		response.Failure = "project exited non-zero"
-	} else if !response.Passed {
-		response.Failure = "stdout did not match expected output"
+func (runner *conformanceRunner) handle(w http.ResponseWriter, request *http.Request) {
+	const maxOutputBytes = 1 << 20
+	submitted, err := io.ReadAll(http.MaxBytesReader(w, request.Body, maxOutputBytes))
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, conformanceResponse{
+			Failure: "submitted output is too large",
+		})
+		return
 	}
 
+	response := conformanceResponse{Passed: bytes.Equal(submitted, runner.expected)}
+	if !response.Passed {
+		response.Failure = "submitted output did not match expected output"
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -335,13 +286,11 @@ func envOrDefault(name, fallback string) string {
 	return fallback
 }
 
-func healthHandler(conformanceEnabled bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":             "ok",
-			"conformanceEnabled": conformanceEnabled,
-		})
-	}
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":             "ok",
+		"conformanceEnabled": true,
+	})
 }
 
 func todosHandler(w http.ResponseWriter, _ *http.Request) {

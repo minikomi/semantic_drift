@@ -71,15 +71,20 @@ Preserve the observable behavior, not incidental implementation structure.
 
 ## Conformance
 
-After writing the target project, ask the already-running oracle to check it:
+After writing the target project, run it and submit its stdout to the
+already-running oracle:
 
 ```sh
-curl -sS -X POST http://127.0.0.1:8899/conform
+uv run python -m semantic_drift submit $TARGET_PROJECT_DIR
 ```
 
-This endpoint is the authoritative conformance check. You may also run `run.sh`
-directly to diagnose build or runtime failures. Do not override the system clock
-or restructure the runtime command for the harness.
+The submit command runs `run.sh` against `/todos`, captures its stdout, and posts
+those exact bytes to `/conform`. The API compares the submitted output with its
+independently calculated result. The API does not run or inspect the target
+project.
+
+You may also run `run.sh` directly to diagnose build or runtime failures. Do not
+override the system clock or restructure the runtime command for the harness.
 
 If conformance fails, inspect stdout/stderr, repair the target project, and run
 the same command again. Continue until the JSON response reports `"passed": true`

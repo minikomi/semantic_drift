@@ -33,19 +33,28 @@ Run:
 uv run pytest
 ```
 
-The first test starts the Go fake API configured for the project and requests:
+The first test starts the Go fake API, runs the project against `/todos`, and
+submits the captured stdout as the body of:
 
 ```sh
 POST http://127.0.0.1:8899/conform
 ```
 
-The fake API runs the project against `/todos`, calculates the expected output
-using its own system date, and compares stdout exactly.
+The fake API calculates the expected output using its own system date and
+compares the submitted bytes exactly. It does not know the project path or run
+generated code itself.
 
 To check one generated project during an agent loop:
 
 ```sh
 uv run python -m semantic_drift conform runs/latest/01-go/project
+```
+
+The standalone `conform` command starts and stops the API itself. During a
+rewrite, where the API is already running, the child process uses:
+
+```sh
+uv run python -m semantic_drift submit runs/latest/01-go/project
 ```
 
 Each generated project owns its runtime wrapper:

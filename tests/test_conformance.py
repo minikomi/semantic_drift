@@ -4,7 +4,9 @@ import pytest
 
 from semantic_drift.conformance import (
     check_project,
+    fake_api,
     log_step,
+    request_conformance,
 )
 
 
@@ -20,5 +22,13 @@ def test_first_go_iteration_matches_expected_output():
         pytest.fail(str(exc))
 
     log_step("checking oracle result")
-    assert result.passed, result.failure or result.command.stderr
+    assert result.passed, result.failure or result.command.stderr.decode(errors="replace")
     log_step("conformance passed")
+
+
+def test_oracle_rejects_incorrect_submitted_output():
+    with fake_api(ROOT):
+        result = request_conformance(b"wrong output\n")
+
+    assert not result.passed
+    assert result.failure == "submitted output did not match expected output"

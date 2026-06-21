@@ -6,7 +6,12 @@ import shutil
 import subprocess
 import sys
 
-from semantic_drift.conformance import check_project, fake_api, log_step
+from semantic_drift.conformance import (
+    check_project,
+    check_project_with_running_api,
+    fake_api,
+    log_step,
+)
 from semantic_drift.prompt import RewritePromptArgs, render_rewrite_prompt
 
 
@@ -15,7 +20,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "conform":
-        return conform(args)
+        return conform(args, api_already_running=False)
+    if args.command == "submit":
+        return conform(args, api_already_running=True)
     if args.command == "prompt":
         return prompt(args)
     if args.command == "rewrite":
@@ -35,6 +42,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     conform_parser.add_argument("project_dir", type=Path, help="generated project directory")
     conform_parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path.cwd(),
+        help="repository root, defaults to current working directory",
+    )
+    submit_parser = subparsers.add_parser(
+        "submit",
+        help="run one generated project's run.sh and submit stdout to the running oracle",
+    )
+    submit_parser.add_argument("project_dir", type=Path, help="generated project directory")
+    submit_parser.add_argument(
         "--repo-root",
         type=Path,
         default=Path.cwd(),
@@ -95,25 +113,28 @@ def add_rewrite_prompt_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def conform(args: argparse.Namespace) -> int:
+def conform(args: argparse.Namespace, *, api_already_running: bool) -> int:
     repo_root = args.repo_root.resolve()
     project_dir = resolve_project_dir(repo_root, args.project_dir)
 
     log_step(f"repo root: {repo_root}")
-    result = check_project(repo_root, project_dir)
+    if api_already_running:
+        result = check_project_with_running_api(repo_root, project_dir)
+    else:
+        result = check_project(repo_root, project_dir)
 
     if result.command.returncode != 0:
-        print("FAIL: generated project exited non-zero", file=sys.stderr)
-        print(result.command.stderr, file=sys.stderr, end="")
+        print(f"FAIL: {result.failure}", file=sys.stderr)
+        print(result.command.stderr.decode(errors="replace"), file=sys.stderr, end="")
         return 1
 
     if not result.passed:
         print(f"FAIL: {result.failure}", file=sys.stderr)
         print("--- stdout ---", file=sys.stderr)
-        print(result.command.stdout, file=sys.stderr, end="")
+        print(result.command.stdout.decode(errors="replace"), file=sys.stderr, end="")
         if result.command.stderr:
             print("--- stderr ---", file=sys.stderr)
-            print(result.command.stderr, file=sys.stderr, end="")
+            print(result.command.stderr.decode(errors="replace"), file=sys.stderr, end="")
         return 1
 
     log_step("conformance passed")
@@ -152,8 +173,7 @@ def rewrite(args: argparse.Namespace) -> int:
     if args.model is not None:
         command[2:2] = ["--model", args.model]
 
-    target_project = rewrite_prompt_args(args).target_project_dir
-    with fake_api(repo_root, target_project):
+    with fake_api(repo_root):
         return subprocess.run(command, cwd=repo_root, input=prompt_text, text=True).returncode
 
 
