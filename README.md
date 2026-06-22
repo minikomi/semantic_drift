@@ -71,6 +71,9 @@ Two prompt conditions are retained as separate files:
   and the instruction to prefer mainstream ecosystem libraries.
 - `prompts/rewrite-neutral.md` is the second prompt used by isolated chain runs;
   it removes experiment labels and library-selection guidance.
+- `prompts/rewrite-neutral-guided.md` is the controlled third condition: it is
+  identical to the neutral prompt except that the original library-selection
+  paragraph is restored.
 
 The prompt CLI defaults to `original`. Select the second condition with
 `--prompt-variant neutral`. The full-chain script defaults to `neutral`; override

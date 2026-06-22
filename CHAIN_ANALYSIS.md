@@ -65,8 +65,7 @@ compile-time annotation, not validation of Axios response data. As a result:
 - String or complex user IDs can reach a `Map<number, Summary>` at runtime.
 - A string such as `"false"` is truthy and can count as completed.
 - Missing values become `undefined` rather than Go zero values.
-- Numeric subtraction in the tie-break comparator can return `NaN` for invalid
-  IDs.
+- Numeric subtraction in the tie-break comparator can return `NaN` for invalid IDs.
 
 The fixture remains valid, so conformance still passes.
 

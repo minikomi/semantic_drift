@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -124,6 +125,7 @@ def check_project_with_running_api(
         completed = subprocess.run(
             [str(run_script), f"{API_ROOT}/todos"],
             cwd=repo_root,
+            env=project_environment(repo_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=20,
@@ -147,3 +149,16 @@ def check_project_with_running_api(
 
     oracle = request_conformance(command.stdout)
     return ConformanceResult(command, oracle.passed, oracle.failure)
+
+
+def project_environment(repo_root: Path) -> dict[str, str]:
+    repo_text = str(repo_root.resolve())
+    environment = os.environ.copy()
+    environment["PATH"] = os.pathsep.join(
+        part
+        for part in environment.get("PATH", "").split(os.pathsep)
+        if part and repo_text not in part
+    )
+    environment.pop("VIRTUAL_ENV", None)
+    environment.pop("PYTHONPATH", None)
+    return environment

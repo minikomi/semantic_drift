@@ -46,6 +46,32 @@ def test_original_prompt_is_retained_as_a_distinct_condition():
     assert str(ROOT) in rendered
 
 
+def test_neutral_guided_differs_only_by_library_guidance():
+    common = dict(
+        repo_root=ROOT,
+        source_language="Go",
+        target_language="TypeScript",
+        source_dir=Path("/tmp/work.123/input"),
+        target_dir=Path("/tmp/work.123/output"),
+        check_command="python3 /tmp/work.123/verify.py",
+    )
+    neutral = render_rewrite_prompt(RewritePromptArgs(**common, prompt_variant="neutral"))
+    guided = render_rewrite_prompt(
+        RewritePromptArgs(**common, prompt_variant="neutral-guided")
+    )
+    paragraph = (
+        "Use idiomatic, mainstream ecosystem libraries rather than lower-level standard\n"
+        "library facilities when a widely adopted library exists for the task. Do not\n"
+        "avoid dependencies merely to make the project self-contained.\n\n"
+    )
+
+    assert guided == neutral.replace(
+        "Declare dependencies using the target language's conventional project tooling,",
+        paragraph
+        + "Declare dependencies using the target language's conventional project tooling,",
+    )
+
+
 def test_child_environment_does_not_expose_repo(monkeypatch):
     monkeypatch.setenv("PATH", f"{ROOT}/.venv/bin:/usr/bin:/bin")
     monkeypatch.setenv("VIRTUAL_ENV", str(ROOT / ".venv"))

@@ -28,6 +28,7 @@ def render_rewrite_prompt(args: RewritePromptArgs) -> str:
     prompt_files = {
         "original": "rewrite.md",
         "neutral": "rewrite-neutral.md",
+        "neutral-guided": "rewrite-neutral-guided.md",
     }
     template_path = args.repo_root / "prompts" / prompt_files[args.prompt_variant]
     template = Template(template_path.read_text())

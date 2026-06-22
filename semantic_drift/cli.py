@@ -113,7 +113,7 @@ def add_rewrite_prompt_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--prompt-variant",
-        choices=["original", "neutral"],
+        choices=["original", "neutral", "neutral-guided"],
         default="original",
         help="prompt condition to render or run",
     )
